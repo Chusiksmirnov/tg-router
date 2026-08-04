@@ -4,7 +4,6 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Registration:
     name: str
-    token: str
     chat_id: int
     chat_type: str
     title: str | None = None

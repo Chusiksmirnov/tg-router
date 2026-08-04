@@ -13,20 +13,23 @@ from server import app
 @pytest.fixture
 def client(tmp_path: Path):
     original_path = server.REGISTRATIONS_PATH
+    original_token = server.TOKEN
     registrations_path = tmp_path / "registrations.xml"
     registrations_path.write_text(
         '<?xml version="1.0"?>\n'
         "<Registrations><Registration>"
-        "<Name>alerts</Name><Token>123:abc</Token><ChatId>-456</ChatId>"
+        "<Name>alerts</Name><ChatId>-456</ChatId>"
         "<ChatType>group</ChatType>"
         "</Registration></Registrations>",
         encoding="utf-8",
     )
     server.REGISTRATIONS_PATH = registrations_path
+    server.TOKEN = "env-token"
     try:
         yield TestClient(app)
     finally:
         server.REGISTRATIONS_PATH = original_path
+        server.TOKEN = original_token
 
 
 @pytest.fixture
@@ -41,7 +44,7 @@ def test_send_message_ok(client: TestClient, mock_send_message: AsyncMock):
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-    mock_send_message.assert_awaited_once_with("123:abc", -456, "hello", None)
+    mock_send_message.assert_awaited_once_with("env-token", -456, "hello", None)
 
 
 def test_send_message_parse_mode(client: TestClient, mock_send_message: AsyncMock):
@@ -51,7 +54,7 @@ def test_send_message_parse_mode(client: TestClient, mock_send_message: AsyncMoc
     )
 
     assert response.status_code == 200
-    mock_send_message.assert_awaited_once_with("123:abc", -456, "*hi*", "MarkdownV2")
+    mock_send_message.assert_awaited_once_with("env-token", -456, "*hi*", "MarkdownV2")
 
 
 def test_invalid_parse_mode_rejected_422(

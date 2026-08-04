@@ -11,6 +11,7 @@ from telegram import send_message
 REGISTRATIONS_PATH = Path(
     os.environ.get("TG_ROUTER_REGISTRATIONS", "./registrations.xml")
 )
+TOKEN = os.environ.get("TG_ROUTER_TOKEN")
 
 app = FastAPI(title="tg-router")
 
@@ -39,10 +40,10 @@ async def post_message(name: str, body: SendMessageRequest) -> SendMessageRespon
     registration = get_registration(REGISTRATIONS_PATH, name)
     if registration is None:
         raise HTTPException(404, f"Unknown bot '{name}'")
+    if not TOKEN:
+        raise HTTPException(500, "TG_ROUTER_TOKEN not configured")
     try:
-        await send_message(
-            registration.token, registration.chat_id, body.text, body.parse_mode
-        )
+        await send_message(TOKEN, registration.chat_id, body.text, body.parse_mode)
     except TelegramAPIError as error:
         raise HTTPException(502, str(error)) from error
     return SendMessageResponse()

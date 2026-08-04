@@ -37,7 +37,7 @@ async def register_chat(name: str, token: str, registrations_path: Path) -> None
             if command.args != secret:
                 return
             path = store_registration(
-                registrations_path, name, token, message.chat, message.from_user
+                registrations_path, name, message.chat, message.from_user
             )
             await message.answer(
                 f"Messages can now be routed to this chat as '{name}'."

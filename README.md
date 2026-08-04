@@ -1,13 +1,20 @@
 # tg-router
 
-Store Telegram bots and route messages to their chats via a web API. Each
-registration binds one bot to one chat under a name; a web request that names
-the bot resolves both the token and the chat_id from a flat XML file.
+Store Telegram chats and route messages to them via a web API using a single bot
+token from the environment. Each registration binds one chat to a name in a flat
+XML file; a web request that names the chat resolves the `chat_id`, and messages
+are sent with the shared token.
 
-Register a bot and chat (prints a one-time deep link to open in Telegram):
+Set the bot token from BotFather once:
 
 ```
-uv run ./src/main.py --register alerts --token <TOKEN>
+export TG_ROUTER_TOKEN=<TOKEN>
+```
+
+Register a chat (prints a one-time deep link to open in Telegram):
+
+```
+uv run ./src/main.py --register alerts
 ```
 
 Serve the web API:

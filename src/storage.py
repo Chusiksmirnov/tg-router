@@ -21,14 +21,12 @@ def read_registrations(registrations_path: Path) -> list[Registration]:
     registrations: list[Registration] = []
     for element in root.findall("Registration"):
         name = element.findtext("Name")
-        token = element.findtext("Token")
         chat_id = element.findtext("ChatId")
-        if not name or not token or not chat_id:
+        if not name or not chat_id:
             continue
         registrations.append(
             Registration(
                 name=name,
-                token=token,
                 chat_id=int(chat_id),
                 chat_type=element.findtext("ChatType", ""),
                 title=element.findtext("Title"),
@@ -81,7 +79,6 @@ def _apply_optional_metadata(
 def store_registration(
     registrations_path: Path,
     name: str,
-    token: str,
     chat: Chat,
     user: User | None,
 ) -> Path:
@@ -103,14 +100,13 @@ def store_registration(
     if existing is None:
         registration = ET.SubElement(root, "Registration")
         ET.SubElement(registration, "Name").text = name
-        ET.SubElement(registration, "Token").text = token
         ET.SubElement(registration, "ChatId").text = str(chat.id)
         ET.SubElement(registration, "ChatType").text = chat.type
         _apply_optional_metadata(registration, chat, user)
     else:
-        _set_child(existing, "Token", token)
         _set_child(existing, "ChatId", str(chat.id))
         _set_child(existing, "ChatType", chat.type)
+        _set_optional_child(existing, "Token", None)
         _apply_optional_metadata(existing, chat, user)
 
     registrations_path.parent.mkdir(parents=True, exist_ok=True)

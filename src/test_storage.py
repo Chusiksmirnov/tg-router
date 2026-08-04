@@ -31,14 +31,13 @@ def test_store_creates_file_and_read_round_trips_all_fields(
         language_code="en",
     )
 
-    stored = store_registration(registrations_path, "alerts", "123:abc", chat, user)
+    stored = store_registration(registrations_path, "alerts", chat, user)
 
     assert stored == registrations_path
     registrations = read_registrations(registrations_path)
     assert registrations == [
         Registration(
             name="alerts",
-            token="123:abc",
             chat_id=-456,
             chat_type="group",
             title="Parents",
@@ -56,6 +55,7 @@ def test_upsert_updates_fields_and_preserves_legacy_metadata(
     registrations_path.write_text(
         '<?xml version="1.0"?>\n'
         "<Registrations><Registration><Name>alerts</Name>"
+        "<Token>old-token</Token>"
         "<LegacyMetadata>keep-me</LegacyMetadata>"
         "</Registration></Registrations>",
         encoding="utf-8",
@@ -63,7 +63,7 @@ def test_upsert_updates_fields_and_preserves_legacy_metadata(
     chat = Chat(id=-999, type=ChatType.GROUP, title="New Title")
     user = User(id=42, is_bot=False, first_name="Example")
 
-    store_registration(registrations_path, "alerts", "456:def", chat, user)
+    store_registration(registrations_path, "alerts", chat, user)
 
     root = ET.parse(registrations_path).getroot()
     assert len(root.findall("Registration")) == 1
@@ -71,7 +71,7 @@ def test_upsert_updates_fields_and_preserves_legacy_metadata(
         root.findtext("./Registration[Name='alerts']/LegacyMetadata")
         == "keep-me"
     )
-    assert root.findtext("./Registration[Name='alerts']/Token") == "456:def"
+    assert root.findtext("./Registration[Name='alerts']/Token") is None
     assert root.findtext("./Registration[Name='alerts']/ChatId") == "-999"
     assert root.findtext("./Registration[Name='alerts']/Title") == "New Title"
 
@@ -82,13 +82,13 @@ def test_second_name_appends_and_get_registration_by_name(
     first = Chat(id=1, type=ChatType.PRIVATE)
     second = Chat(id=2, type=ChatType.PRIVATE)
 
-    store_registration(registrations_path, "alerts", "123:abc", first, None)
-    store_registration(registrations_path, "other", "456:def", second, None)
+    store_registration(registrations_path, "alerts", first, None)
+    store_registration(registrations_path, "other", second, None)
 
     root = ET.parse(registrations_path).getroot()
     assert len(root.findall("Registration")) == 2
-    assert get_registration(registrations_path, "alerts").token == "123:abc"
-    assert get_registration(registrations_path, "other").token == "456:def"
+    assert get_registration(registrations_path, "alerts").chat_id == 1
+    assert get_registration(registrations_path, "other").chat_id == 2
     assert get_registration(registrations_path, "unknown") is None
 
 
