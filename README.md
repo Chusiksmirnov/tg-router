@@ -30,3 +30,11 @@ curl -X POST localhost:8000/bots/alerts/messages \
   -H 'content-type: application/json' \
   -d '{"text": "<b>bold</b> code: <code>1+1=2</code> 🚀", "parse_mode": "HTML"}'
 ```
+
+## Running tests
+
+Run the pytest suite (in `src/test_*.py`):
+
+```
+uv run pytest src/
+```

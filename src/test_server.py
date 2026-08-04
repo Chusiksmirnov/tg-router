@@ -1,124 +1,103 @@
-import tempfile
-import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
+import pytest
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import SendMessage
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock
 
 import server
 from server import app
 
 
-class ServerTests(unittest.TestCase):
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tempdir.cleanup)
-        self.addCleanup(self._restore_path)
-        self._original_path = server.REGISTRATIONS_PATH
-        server.REGISTRATIONS_PATH = Path(self.tempdir.name) / "registrations.xml"
-        server.REGISTRATIONS_PATH.write_text(
-            '<?xml version="1.0"?>\n'
-            "<Registrations><Registration>"
-            "<Name>alerts</Name><Token>123:abc</Token><ChatId>-456</ChatId>"
-            "<ChatType>group</ChatType>"
-            "</Registration></Registrations>",
-            encoding="utf-8",
-        )
-        self.client = TestClient(app)
-
-    def _restore_path(self):
-        server.REGISTRATIONS_PATH = self._original_path
-
-    def _patch_send(self, fake):
-        self.patcher = unittest.mock.patch.object(
-            server, "send_message", fake
-        )
-        self.mock = self.patcher.start()
-        self.addCleanup(self.patcher.stop)
-        return self.mock
-
-    def test_send_message_ok(self):
-        fake = AsyncMock()
-        self._patch_send(fake)
-
-        response = self.client.post(
-            "/bots/alerts/messages", json={"text": "hello"}
-        )
-
-        self.assertEqual(200, response.status_code)
-        self.assertEqual({"ok": True}, response.json())
-        fake.assert_awaited_once_with("123:abc", -456, "hello", None)
-
-    def test_send_message_parse_mode(self):
-        fake = AsyncMock()
-        self._patch_send(fake)
-
-        response = self.client.post(
-            "/bots/alerts/messages",
-            json={"text": "*hi*", "parse_mode": "MarkdownV2"},
-        )
-
-        self.assertEqual(200, response.status_code)
-        fake.assert_awaited_once_with("123:abc", -456, "*hi*", "MarkdownV2")
-
-    def test_invalid_parse_mode_rejected_422(self):
-        fake = AsyncMock()
-        self._patch_send(fake)
-
-        response = self.client.post(
-            "/bots/alerts/messages", json={"text": "hi", "parse_mode": "Bogus"}
-        )
-
-        self.assertEqual(422, response.status_code)
-        fake.assert_not_awaited()
-
-    def test_unknown_bot_returns_404(self):
-        fake = AsyncMock()
-        self._patch_send(fake)
-
-        response = self.client.post(
-            "/bots/unknown/messages", json={"text": "hello"}
-        )
-
-        self.assertEqual(404, response.status_code)
-        self.assertIn("Unknown bot 'unknown'", response.text)
-        fake.assert_not_awaited()
-
-    def test_telegram_error_returns_502(self):
-        error = TelegramBadRequest(
-            method=SendMessage(chat_id=1, text="x"), message="bad"
-        )
-        fake = AsyncMock(side_effect=error)
-        self._patch_send(fake)
-
-        response = self.client.post(
-            "/bots/alerts/messages", json={"text": "hello"}
-        )
-
-        self.assertEqual(502, response.status_code)
-
-    def test_empty_text_rejected_422(self):
-        fake = AsyncMock()
-        self._patch_send(fake)
-
-        response = self.client.post("/bots/alerts/messages", json={"text": ""})
-
-        self.assertEqual(422, response.status_code)
-        fake.assert_not_awaited()
-
-    def test_list_bots_omits_tokens(self):
-        response = self.client.get("/bots")
-
-        self.assertEqual(200, response.status_code)
-        body = response.text
-        self.assertIn("alerts", body)
-        self.assertNotIn("123:abc", body)
-
-    def test_health(self):
-        self.assertEqual({"ok": True}, self.client.get("/health").json())
+@pytest.fixture
+def client(tmp_path: Path):
+    original_path = server.REGISTRATIONS_PATH
+    registrations_path = tmp_path / "registrations.xml"
+    registrations_path.write_text(
+        '<?xml version="1.0"?>\n'
+        "<Registrations><Registration>"
+        "<Name>alerts</Name><Token>123:abc</Token><ChatId>-456</ChatId>"
+        "<ChatType>group</ChatType>"
+        "</Registration></Registrations>",
+        encoding="utf-8",
+    )
+    server.REGISTRATIONS_PATH = registrations_path
+    try:
+        yield TestClient(app)
+    finally:
+        server.REGISTRATIONS_PATH = original_path
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.fixture
+def mock_send_message():
+    fake = AsyncMock()
+    with patch.object(server, "send_message", fake):
+        yield fake
+
+
+def test_send_message_ok(client: TestClient, mock_send_message: AsyncMock):
+    response = client.post("/bots/alerts/messages", json={"text": "hello"})
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    mock_send_message.assert_awaited_once_with("123:abc", -456, "hello", None)
+
+
+def test_send_message_parse_mode(client: TestClient, mock_send_message: AsyncMock):
+    response = client.post(
+        "/bots/alerts/messages",
+        json={"text": "*hi*", "parse_mode": "MarkdownV2"},
+    )
+
+    assert response.status_code == 200
+    mock_send_message.assert_awaited_once_with("123:abc", -456, "*hi*", "MarkdownV2")
+
+
+def test_invalid_parse_mode_rejected_422(
+    client: TestClient, mock_send_message: AsyncMock
+):
+    response = client.post(
+        "/bots/alerts/messages", json={"text": "hi", "parse_mode": "Bogus"}
+    )
+
+    assert response.status_code == 422
+    mock_send_message.assert_not_awaited()
+
+
+def test_unknown_bot_returns_404(client: TestClient, mock_send_message: AsyncMock):
+    response = client.post("/bots/unknown/messages", json={"text": "hello"})
+
+    assert response.status_code == 404
+    assert "Unknown bot 'unknown'" in response.text
+    mock_send_message.assert_not_awaited()
+
+
+def test_telegram_error_returns_502(client: TestClient, mock_send_message: AsyncMock):
+    error = TelegramBadRequest(
+        method=SendMessage(chat_id=1, text="x"), message="bad"
+    )
+    mock_send_message.side_effect = error
+
+    response = client.post("/bots/alerts/messages", json={"text": "hello"})
+
+    assert response.status_code == 502
+
+
+def test_empty_text_rejected_422(client: TestClient, mock_send_message: AsyncMock):
+    response = client.post("/bots/alerts/messages", json={"text": ""})
+
+    assert response.status_code == 422
+    mock_send_message.assert_not_awaited()
+
+
+def test_list_bots_omits_tokens(client: TestClient):
+    response = client.get("/bots")
+
+    assert response.status_code == 200
+    assert "alerts" in response.text
+    assert "123:abc" not in response.text
+
+
+def test_health(client: TestClient):
+    assert client.get("/health").json() == {"ok": True}

@@ -5,3 +5,8 @@ description = "Store Telegram bots and route messages to their chats via a web A
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["aiogram>=3.26.0,<4", "fastapi", "uvicorn", "httpx"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
