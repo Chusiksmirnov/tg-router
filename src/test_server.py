@@ -49,7 +49,30 @@ class ServerTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertEqual({"ok": True}, response.json())
-        fake.assert_awaited_once_with("123:abc", -456, "hello")
+        fake.assert_awaited_once_with("123:abc", -456, "hello", None)
+
+    def test_send_message_parse_mode(self):
+        fake = AsyncMock()
+        self._patch_send(fake)
+
+        response = self.client.post(
+            "/bots/alerts/messages",
+            json={"text": "*hi*", "parse_mode": "MarkdownV2"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        fake.assert_awaited_once_with("123:abc", -456, "*hi*", "MarkdownV2")
+
+    def test_invalid_parse_mode_rejected_422(self):
+        fake = AsyncMock()
+        self._patch_send(fake)
+
+        response = self.client.post(
+            "/bots/alerts/messages", json={"text": "hi", "parse_mode": "Bogus"}
+        )
+
+        self.assertEqual(422, response.status_code)
+        fake.assert_not_awaited()
 
     def test_unknown_bot_returns_404(self):
         fake = AsyncMock()

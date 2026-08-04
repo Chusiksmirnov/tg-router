@@ -17,6 +17,9 @@ app = FastAPI(title="tg-router")
 
 class SendMessageRequest(BaseModel):
     text: str = Field(min_length=1)
+    parse_mode: str | None = Field(
+        default=None, pattern="^(HTML|MarkdownV2|Markdown)$"
+    )
 
 
 class SendMessageResponse(BaseModel):
@@ -37,7 +40,9 @@ async def post_message(name: str, body: SendMessageRequest) -> SendMessageRespon
     if registration is None:
         raise HTTPException(404, f"Unknown bot '{name}'")
     try:
-        await send_message(registration.token, registration.chat_id, body.text)
+        await send_message(
+            registration.token, registration.chat_id, body.text, body.parse_mode
+        )
     except TelegramAPIError as error:
         raise HTTPException(502, str(error)) from error
     return SendMessageResponse()
