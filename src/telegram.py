@@ -22,8 +22,13 @@ async def register_chat(name: str, token: str, registrations_path: Path) -> None
         if not bot_user.username:
             raise RuntimeError("Telegram bot has no username")
 
-        print(f"https://t.me/{bot_user.username}?start={secret}", flush=True)
-        print("Waiting for the Telegram chat to follow the link...", flush=True)
+        base = f"https://t.me/{bot_user.username}"
+        print(f"Private chat: {base}?start={secret}", flush=True)
+        print(f"Group chat:   {base}?startgroup={secret}", flush=True)
+        print(
+            "Waiting for the Telegram chat to open one of the links...",
+            flush=True,
+        )
 
         @dispatcher.message(CommandStart(deep_link=True))
         async def register(message: Message, command: CommandObject) -> None:
