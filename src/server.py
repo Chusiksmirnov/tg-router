@@ -1,19 +1,13 @@
-import os
-from pathlib import Path
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from storage import get_registration, read_registrations
-from telegram import send_message
-
-REGISTRATIONS_PATH = Path(
-    os.environ.get("TG_ROUTER_REGISTRATIONS", "./registrations.xml")
-)
-TOKEN = os.environ.get("TG_ROUTER_TOKEN")
-
-app = FastAPI(title="tg-router")
+from config import Settings, load_settings
+from storage import StorageError, get_registration, read_registrations
 
 
 class SendMessageRequest(BaseModel):
@@ -35,34 +29,75 @@ class BotInfo(BaseModel):
     username: str | None
 
 
-@app.post("/bots/{name}/messages", response_model=SendMessageResponse)
-async def post_message(name: str, body: SendMessageRequest) -> SendMessageResponse:
-    registration = get_registration(REGISTRATIONS_PATH, name)
-    if registration is None:
-        raise HTTPException(404, f"Unknown bot '{name}'")
-    if not TOKEN:
-        raise HTTPException(500, "TG_ROUTER_TOKEN not configured")
-    try:
-        await send_message(TOKEN, registration.chat_id, body.text, body.parse_mode)
-    except TelegramAPIError as error:
-        raise HTTPException(502, str(error)) from error
-    return SendMessageResponse()
+def get_settings(request: Request) -> Settings:
+    return request.app.state.settings
 
 
-@app.get("/bots", response_model=list[BotInfo])
-async def list_bots() -> list[BotInfo]:
-    return [
-        BotInfo(
-            name=registration.name,
-            chat_id=registration.chat_id,
-            chat_type=registration.chat_type,
-            title=registration.title,
-            username=registration.username,
-        )
-        for registration in read_registrations(REGISTRATIONS_PATH)
-    ]
+def get_bot(request: Request) -> Bot:
+    return request.app.state.bot
 
 
-@app.get("/health")
-async def health() -> dict[str, bool]:
-    return {"ok": True}
+def create_app(settings: Settings | None = None) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if not hasattr(app.state, "settings"):
+            app.state.settings = load_settings()
+        if not hasattr(app.state, "bot"):
+            app.state.bot = Bot(token=app.state.settings.token)
+        yield
+        await app.state.bot.session.close()
+
+    app = FastAPI(title="tg-router", lifespan=lifespan)
+    if settings is not None:
+        app.state.settings = settings
+
+    @app.post("/bots/{name}/messages", response_model=SendMessageResponse)
+    async def post_message(
+        name: str,
+        body: SendMessageRequest,
+        settings: Settings = Depends(get_settings),
+        bot: Bot = Depends(get_bot),
+    ) -> SendMessageResponse:
+        try:
+            registration = get_registration(settings.registrations_path, name)
+        except StorageError as error:
+            raise HTTPException(500, str(error)) from error
+        if registration is None:
+            raise HTTPException(404, f"Unknown bot '{name}'")
+        try:
+            await bot.send_message(
+                chat_id=registration.chat_id,
+                text=body.text,
+                parse_mode=body.parse_mode,
+            )
+        except TelegramAPIError as error:
+            raise HTTPException(502, str(error)) from error
+        return SendMessageResponse()
+
+    @app.get("/bots", response_model=list[BotInfo])
+    async def list_bots(
+        settings: Settings = Depends(get_settings),
+    ) -> list[BotInfo]:
+        try:
+            registrations = read_registrations(settings.registrations_path)
+        except StorageError as error:
+            raise HTTPException(500, str(error)) from error
+        return [
+            BotInfo(
+                name=registration.name,
+                chat_id=registration.chat_id,
+                chat_type=registration.chat_type,
+                title=registration.title,
+                username=registration.username,
+            )
+            for registration in registrations
+        ]
+
+    @app.get("/health")
+    async def health() -> dict[str, bool]:
+        return {"ok": True}
+
+    return app
+
+
+app = create_app()

@@ -7,6 +7,7 @@ from aiogram.types import Chat, User
 
 from model import Registration
 from storage import (
+    StorageError,
     get_registration,
     read_registrations,
     store_registration,
@@ -34,6 +35,7 @@ def test_store_creates_file_and_read_round_trips_all_fields(
     stored = store_registration(registrations_path, "alerts", chat, user)
 
     assert stored == registrations_path
+    assert list(tmp_path.iterdir()) == [registrations_path]
     registrations = read_registrations(registrations_path)
     assert registrations == [
         Registration(
@@ -95,3 +97,43 @@ def test_second_name_appends_and_get_registration_by_name(
 def test_missing_file_reads_empty(tmp_path: Path, registrations_path: Path):
     assert read_registrations(registrations_path) == []
     assert get_registration(registrations_path, "alerts") is None
+
+
+def test_corrupt_file_raises_storage_error(
+    tmp_path: Path, registrations_path: Path
+):
+    registrations_path.write_text("not xml", encoding="utf-8")
+
+    with pytest.raises(StorageError, match="Cannot parse registrations file"):
+        read_registrations(registrations_path)
+    with pytest.raises(StorageError, match="Cannot parse registrations file"):
+        get_registration(registrations_path, "alerts")
+
+
+def test_non_integer_chat_id_raises_storage_error(
+    tmp_path: Path, registrations_path: Path
+):
+    registrations_path.write_text(
+        '<?xml version="1.0"?>\n'
+        "<Registrations><Registration>"
+        "<Name>alerts</Name><ChatId>abc</ChatId>"
+        "</Registration></Registrations>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StorageError, match="Invalid ChatId 'abc'"):
+        read_registrations(registrations_path)
+
+
+def test_wrong_root_tag_raises_storage_error(
+    tmp_path: Path, registrations_path: Path
+):
+    registrations_path.write_text(
+        '<?xml version="1.0"?>\n<Other></Other>', encoding="utf-8"
+    )
+
+    with pytest.raises(StorageError, match="Unexpected root element 'Other'"):
+        read_registrations(registrations_path)
+    chat = Chat(id=1, type=ChatType.PRIVATE)
+    with pytest.raises(StorageError, match="Unexpected root element 'Other'"):
+        store_registration(registrations_path, "alerts", chat, None)

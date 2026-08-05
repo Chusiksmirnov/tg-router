@@ -8,13 +8,6 @@ from aiogram.types import Message
 from storage import store_registration
 
 
-async def send_message(
-    token: str, chat_id: int, text: str, parse_mode: str | None = None
-) -> None:
-    async with Bot(token=token) as bot:
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
-
-
 async def register_chat(name: str, token: str, registrations_path: Path) -> None:
     secret = secrets.token_urlsafe(24)
     dispatcher = Dispatcher()

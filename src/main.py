@@ -1,8 +1,9 @@
 import argparse
 import asyncio
-import os
+from dataclasses import replace
 from pathlib import Path
 
+from config import load_settings
 from telegram import register_chat
 
 
@@ -22,14 +23,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    token = os.environ.get("TG_ROUTER_TOKEN")
-    if not token:
-        raise SystemExit("TG_ROUTER_TOKEN environment variable must be set")
+    try:
+        settings = load_settings()
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from error
+    settings = replace(
+        settings, registrations_path=Path(args.registrations).expanduser()
+    )
     asyncio.run(
         register_chat(
-            args.register,
-            token.strip(),
-            Path(args.registrations).expanduser(),
+            args.register, settings.token, settings.registrations_path
         )
     )
     return 0
