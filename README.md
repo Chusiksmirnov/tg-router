@@ -32,11 +32,19 @@ Serve the web API:
 uv run uvicorn server:app --app-dir src --port 8000
 ```
 
-Send a message to the registered chat (plain text by default):
+## API
+
+### Send a message
 
 ```
 curl -X POST localhost:8000/bots/alerts/messages \
   -H 'content-type: application/json' -d '{"text": "hello"}'
+```
+
+Example response:
+
+```json
+{"ok": true}
 ```
 
 Format with HTML or MarkdownV2 by setting `parse_mode`:
@@ -47,10 +55,39 @@ curl -X POST localhost:8000/bots/alerts/messages \
   -d '{"text": "<b>bold</b> code: <code>1+1=2</code> 🚀", "parse_mode": "HTML"}'
 ```
 
-List registered chats:
+### List registered chats
 
 ```
 curl localhost:8000/bots
+```
+
+Example response:
+
+```json
+[
+  {
+    "name": "alerts",
+    "chat_id": -456,
+    "chat_type": "group",
+    "title": "Alerts",
+    "username": "alerts-ops",
+    "first_name": "Alert",
+    "last_name": "Ops",
+    "language_code": "en"
+  }
+]
+```
+
+### Health check
+
+```
+curl localhost:8000/health
+```
+
+Example response:
+
+```json
+{"ok": true}
 ```
 
 ## Running tests
