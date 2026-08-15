@@ -2,7 +2,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import (
+    TelegramAPIError,
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNotFound,
+)
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -11,7 +16,7 @@ from storage import StorageError, get_registration, read_registrations
 
 
 class SendMessageRequest(BaseModel):
-    text: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=4096)
     parse_mode: str | None = Field(
         default=None, pattern="^(HTML|MarkdownV2|Markdown)$"
     )
@@ -27,6 +32,9 @@ class BotInfo(BaseModel):
     chat_type: str
     title: str | None
     username: str | None
+    first_name: str | None
+    last_name: str | None
+    language_code: str | None
 
 
 def get_settings(request: Request) -> Settings:
@@ -70,6 +78,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 text=body.text,
                 parse_mode=body.parse_mode,
             )
+        except TelegramBadRequest as error:
+            raise HTTPException(400, str(error)) from error
+        except TelegramForbiddenError as error:
+            raise HTTPException(403, str(error)) from error
+        except TelegramNotFound as error:
+            raise HTTPException(404, str(error)) from error
         except TelegramAPIError as error:
             raise HTTPException(502, str(error)) from error
         return SendMessageResponse()
@@ -89,6 +103,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 chat_type=registration.chat_type,
                 title=registration.title,
                 username=registration.username,
+                first_name=registration.first_name,
+                last_name=registration.last_name,
+                language_code=registration.language_code,
             )
             for registration in registrations
         ]

@@ -1,10 +1,13 @@
 import argparse
 import asyncio
+import re
 from dataclasses import replace
 from pathlib import Path
 
 from config import load_settings
 from telegram import register_chat
+
+NAME_PATTERN = r"[A-Za-z0-9_-]+"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -23,6 +26,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not re.fullmatch(NAME_PATTERN, args.register):
+        raise SystemExit(
+            f"Invalid registration name {args.register!r}: "
+            "use only letters, digits, '_' or '-'"
+        )
     try:
         settings = load_settings()
     except RuntimeError as error:

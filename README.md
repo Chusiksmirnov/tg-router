@@ -11,7 +11,16 @@ Set the bot token from BotFather once:
 export TG_ROUTER_TOKEN=<TOKEN>
 ```
 
-Register a chat (prints a one-time deep link to open in Telegram):
+Optionally override where registrations are stored (default
+`./registrations.xml`):
+
+```
+export TG_ROUTER_REGISTRATIONS=/path/to/registrations.xml
+```
+
+Register a chat (prints a one-time deep link to open in Telegram). The name
+may only contain letters, digits, `_` and `-`; it is the key used in the API
+paths. Use `-r/--registrations` to store registrations in another file:
 
 ```
 uv run ./src/main.py --register alerts
@@ -36,6 +45,12 @@ Format with HTML or MarkdownV2 by setting `parse_mode`:
 curl -X POST localhost:8000/bots/alerts/messages \
   -H 'content-type: application/json' \
   -d '{"text": "<b>bold</b> code: <code>1+1=2</code> 🚀", "parse_mode": "HTML"}'
+```
+
+List registered chats:
+
+```
+curl localhost:8000/bots
 ```
 
 ## Running tests

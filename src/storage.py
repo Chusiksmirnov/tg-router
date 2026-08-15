@@ -33,12 +33,19 @@ def read_registrations(registrations_path: Path) -> list[Registration]:
         raise StorageError(
             f"Unexpected root element '{root.tag}' in {registrations_path}"
         )
+    _ensure_unique_names(root, registrations_path)
     registrations: list[Registration] = []
     for element in root.findall("Registration"):
         name = element.findtext("Name")
         chat_id = element.findtext("ChatId")
-        if not name or not chat_id:
-            continue
+        if not name:
+            raise StorageError(
+                f"Registration entry without a Name in {registrations_path}"
+            )
+        if not chat_id:
+            raise StorageError(
+                f"Registration '{name}' without a ChatId in {registrations_path}"
+            )
         try:
             parsed_chat_id = int(chat_id)
         except ValueError as error:
@@ -68,6 +75,19 @@ def get_registration(
         if registration.name == name:
             return registration
     return None
+
+
+def _ensure_unique_names(root: ET.Element, registrations_path: Path) -> None:
+    seen: set[str] = set()
+    for element in root.findall("Registration"):
+        name = element.findtext("Name")
+        if name is None:
+            continue
+        if name in seen:
+            raise StorageError(
+                f"Duplicate registration name '{name}' in {registrations_path}"
+            )
+        seen.add(name)
 
 
 def _set_child(element: ET.Element, tag: str, text: str) -> None:
@@ -122,6 +142,7 @@ def store_registration(
             raise StorageError(
                 f"Unexpected root element '{root.tag}' in {registrations_path}"
             )
+        _ensure_unique_names(root, registrations_path)
     else:
         root = ET.Element("Registrations")
         tree = ET.ElementTree(root)

@@ -137,3 +137,70 @@ def test_wrong_root_tag_raises_storage_error(
     chat = Chat(id=1, type=ChatType.PRIVATE)
     with pytest.raises(StorageError, match="Unexpected root element 'Other'"):
         store_registration(registrations_path, "alerts", chat, None)
+
+
+def test_entry_without_name_raises_storage_error(
+    tmp_path: Path, registrations_path: Path
+):
+    registrations_path.write_text(
+        '<?xml version="1.0"?>\n'
+        "<Registrations><Registration>"
+        "<ChatId>-456</ChatId></Registration></Registrations>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StorageError, match="without a Name"):
+        read_registrations(registrations_path)
+
+
+def test_entry_without_chat_id_raises_storage_error(
+    tmp_path: Path, registrations_path: Path
+):
+    registrations_path.write_text(
+        '<?xml version="1.0"?>\n'
+        "<Registrations><Registration>"
+        "<Name>alerts</Name></Registration></Registrations>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StorageError, match="without a ChatId"):
+        read_registrations(registrations_path)
+
+
+def test_duplicate_names_raise_storage_error(
+    tmp_path: Path, registrations_path: Path
+):
+    registrations_path.write_text(
+        '<?xml version="1.0"?>\n'
+        "<Registrations>"
+        "<Registration><Name>alerts</Name><ChatId>1</ChatId></Registration>"
+        "<Registration><Name>alerts</Name><ChatId>2</ChatId></Registration>"
+        "</Registrations>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        StorageError, match="Duplicate registration name 'alerts'"
+    ):
+        read_registrations(registrations_path)
+
+
+def test_store_into_duplicate_file_raises_storage_error(
+    tmp_path: Path, registrations_path: Path
+):
+    before = (
+        '<?xml version="1.0"?>\n'
+        "<Registrations>"
+        "<Registration><Name>alerts</Name><ChatId>1</ChatId></Registration>"
+        "<Registration><Name>alerts</Name><ChatId>2</ChatId></Registration>"
+        "</Registrations>"
+    )
+    registrations_path.write_text(before, encoding="utf-8")
+    chat = Chat(id=3, type=ChatType.PRIVATE)
+
+    with pytest.raises(
+        StorageError, match="Duplicate registration name 'alerts'"
+    ):
+        store_registration(registrations_path, "other", chat, None)
+
+    assert registrations_path.read_text(encoding="utf-8") == before

@@ -2,7 +2,12 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNotFound,
+    TelegramServerError,
+)
 from aiogram.methods import SendMessage
 from fastapi.testclient import TestClient
 
@@ -18,6 +23,9 @@ def settings(tmp_path: Path) -> Settings:
         "<Registrations><Registration>"
         "<Name>alerts</Name><ChatId>-456</ChatId>"
         "<ChatType>group</ChatType>"
+        "<Title>Alerts</Title><Username>alerts-ops</Username>"
+        "<FirstName>Alert</FirstName><LastName>Ops</LastName>"
+        "<LanguageCode>en</LanguageCode>"
         "</Registration></Registrations>",
         encoding="utf-8",
     )
@@ -76,15 +84,58 @@ def test_unknown_bot_returns_404(client: TestClient, bot: AsyncMock):
     bot.send_message.assert_not_awaited()
 
 
-def test_telegram_error_returns_502(client: TestClient, bot: AsyncMock):
-    error = TelegramBadRequest(
-        method=SendMessage(chat_id=1, text="x"), message="bad"
+def test_telegram_server_error_returns_502(client: TestClient, bot: AsyncMock):
+    error = TelegramServerError(
+        method=SendMessage(chat_id=1, text="x"), message="internal"
     )
     bot.send_message.side_effect = error
 
     response = client.post("/bots/alerts/messages", json={"text": "hello"})
 
     assert response.status_code == 502
+
+
+def test_telegram_bad_request_returns_400(client: TestClient, bot: AsyncMock):
+    error = TelegramBadRequest(
+        method=SendMessage(chat_id=1, text="x"), message="can't parse entities"
+    )
+    bot.send_message.side_effect = error
+
+    response = client.post("/bots/alerts/messages", json={"text": "hello"})
+
+    assert response.status_code == 400
+    assert "can't parse entities" in response.text
+
+
+def test_telegram_forbidden_returns_403(client: TestClient, bot: AsyncMock):
+    error = TelegramForbiddenError(
+        method=SendMessage(chat_id=1, text="x"), message="bot was kicked"
+    )
+    bot.send_message.side_effect = error
+
+    response = client.post("/bots/alerts/messages", json={"text": "hello"})
+
+    assert response.status_code == 403
+
+
+def test_telegram_not_found_returns_404(client: TestClient, bot: AsyncMock):
+    error = TelegramNotFound(
+        method=SendMessage(chat_id=1, text="x"), message="chat not found"
+    )
+    bot.send_message.side_effect = error
+
+    response = client.post("/bots/alerts/messages", json={"text": "hello"})
+
+    assert response.status_code == 404
+
+
+def test_text_over_4096_rejected_422(client: TestClient, bot: AsyncMock):
+    response = client.post(
+        "/bots/alerts/messages", json={"text": "a" * 4097}
+    )
+
+    assert response.status_code == 422
+    bot.send_message.assert_not_awaited()
 
 
 def test_empty_text_rejected_422(client: TestClient, bot: AsyncMock):
@@ -103,8 +154,11 @@ def test_list_bots(client: TestClient):
             "name": "alerts",
             "chat_id": -456,
             "chat_type": "group",
-            "title": None,
-            "username": None,
+            "title": "Alerts",
+            "username": "alerts-ops",
+            "first_name": "Alert",
+            "last_name": "Ops",
+            "language_code": "en",
         }
     ]
 
