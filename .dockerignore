@@ -1,0 +1,11 @@
+.env
+.env.example
+.git
+.venv
+.pytest_cache
+**/__pycache__/
+src/test_*.py
+src/registrations.xml
+Dockerfile
+docker-compose.yml
+README.md

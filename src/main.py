@@ -18,8 +18,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "-r",
         "--registrations",
-        default="./registrations.xml",
-        help="path to the registrations XML file",
+        default=None,
+        help="path to the registrations XML file "
+        "(default: $TG_ROUTER_REGISTRATIONS or ./registrations.xml)",
     )
     return parser.parse_args(argv)
 
@@ -35,9 +36,10 @@ def main(argv: list[str] | None = None) -> int:
         settings = load_settings()
     except RuntimeError as error:
         raise SystemExit(str(error)) from error
-    settings = replace(
-        settings, registrations_path=Path(args.registrations).expanduser()
-    )
+    if args.registrations is not None:
+        settings = replace(
+            settings, registrations_path=Path(args.registrations).expanduser()
+        )
     asyncio.run(
         register_chat(
             args.register, settings.token, settings.registrations_path

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from config import Settings, load_settings
 from storage import StorageError, get_registration, read_registrations
+
+logger = logging.getLogger("tg-router")
 
 
 class SendMessageRequest(BaseModel):
@@ -52,6 +55,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.settings = load_settings()
         if not hasattr(app.state, "bot"):
             app.state.bot = Bot(token=app.state.settings.token)
+        try:
+            await app.state.bot.get_me()
+        except TelegramAPIError as error:
+            await app.state.bot.session.close()
+            raise RuntimeError(f"Failed to validate TG_ROUTER_TOKEN: {error}") from error
         yield
         await app.state.bot.session.close()
 
@@ -69,7 +77,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             registration = get_registration(settings.registrations_path, name)
         except StorageError as error:
-            raise HTTPException(500, str(error)) from error
+            logger.error(
+                "cannot read registrations from %s: %s",
+                settings.registrations_path, error,
+            )
+            raise HTTPException(500, "Registrations file is unreadable") from error
         if registration is None:
             raise HTTPException(404, f"Unknown bot '{name}'")
         try:
@@ -79,13 +91,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 parse_mode=body.parse_mode,
             )
         except TelegramBadRequest as error:
-            raise HTTPException(400, str(error)) from error
+            logger.warning(
+                "send_message rejected for registration %r (chat %s): %s",
+                name, registration.chat_id, error,
+            )
+            raise HTTPException(400, "Telegram rejected the message") from error
         except TelegramForbiddenError as error:
-            raise HTTPException(403, str(error)) from error
+            logger.warning(
+                "send_message rejected for registration %r (chat %s): %s",
+                name, registration.chat_id, error,
+            )
+            raise HTTPException(403, "The bot no longer has access to this chat") from error
         except TelegramNotFound as error:
-            raise HTTPException(404, str(error)) from error
+            logger.warning(
+                "send_message rejected for registration %r (chat %s): %s",
+                name, registration.chat_id, error,
+            )
+            raise HTTPException(404, "Telegram could not find this chat") from error
         except TelegramAPIError as error:
-            raise HTTPException(502, str(error)) from error
+            logger.error(
+                "send_message failed for registration %r (chat %s): %s",
+                name, registration.chat_id, error,
+            )
+            raise HTTPException(502, "Failed to communicate with Telegram") from error
         return SendMessageResponse()
 
     @app.get("/bots", response_model=list[BotInfo])
@@ -95,7 +123,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             registrations = read_registrations(settings.registrations_path)
         except StorageError as error:
-            raise HTTPException(500, str(error)) from error
+            logger.error(
+                "cannot read registrations from %s: %s",
+                settings.registrations_path, error,
+            )
+            raise HTTPException(500, "Registrations file is unreadable") from error
         return [
             BotInfo(
                 name=registration.name,

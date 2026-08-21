@@ -7,6 +7,7 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramNotFound,
     TelegramServerError,
+    TelegramUnauthorizedError,
 )
 from aiogram.methods import SendMessage
 from fastapi.testclient import TestClient
@@ -84,6 +85,19 @@ def test_unknown_bot_returns_404(client: TestClient, bot: AsyncMock):
     bot.send_message.assert_not_awaited()
 
 
+def test_startup_fails_when_token_rejected(settings: Settings):
+    bot = AsyncMock()
+    bot.get_me.side_effect = TelegramUnauthorizedError(
+        method=SendMessage(chat_id=1, text="x"), message="Unauthorized"
+    )
+    app = create_app(settings)
+    app.state.bot = bot
+    with pytest.raises(RuntimeError, match="Failed to validate TG_ROUTER_TOKEN"):
+        with TestClient(app):
+            pass
+    bot.session.close.assert_awaited_once()
+
+
 def test_telegram_server_error_returns_502(client: TestClient, bot: AsyncMock):
     error = TelegramServerError(
         method=SendMessage(chat_id=1, text="x"), message="internal"
@@ -93,6 +107,7 @@ def test_telegram_server_error_returns_502(client: TestClient, bot: AsyncMock):
     response = client.post("/bots/alerts/messages", json={"text": "hello"})
 
     assert response.status_code == 502
+    assert response.json()["detail"] == "Failed to communicate with Telegram"
 
 
 def test_telegram_bad_request_returns_400(client: TestClient, bot: AsyncMock):
@@ -104,7 +119,7 @@ def test_telegram_bad_request_returns_400(client: TestClient, bot: AsyncMock):
     response = client.post("/bots/alerts/messages", json={"text": "hello"})
 
     assert response.status_code == 400
-    assert "can't parse entities" in response.text
+    assert response.json()["detail"] == "Telegram rejected the message"
 
 
 def test_telegram_forbidden_returns_403(client: TestClient, bot: AsyncMock):
@@ -116,6 +131,7 @@ def test_telegram_forbidden_returns_403(client: TestClient, bot: AsyncMock):
     response = client.post("/bots/alerts/messages", json={"text": "hello"})
 
     assert response.status_code == 403
+    assert response.json()["detail"] == "The bot no longer has access to this chat"
 
 
 def test_telegram_not_found_returns_404(client: TestClient, bot: AsyncMock):
@@ -127,6 +143,7 @@ def test_telegram_not_found_returns_404(client: TestClient, bot: AsyncMock):
     response = client.post("/bots/alerts/messages", json={"text": "hello"})
 
     assert response.status_code == 404
+    assert response.json()["detail"] == "Telegram could not find this chat"
 
 
 def test_text_over_4096_rejected_422(client: TestClient, bot: AsyncMock):
@@ -172,7 +189,9 @@ def test_corrupt_registrations_returns_500(
     get = client.get("/bots")
 
     assert post.status_code == 500
+    assert post.json()["detail"] == "Registrations file is unreadable"
     assert get.status_code == 500
+    assert get.json()["detail"] == "Registrations file is unreadable"
     bot.send_message.assert_not_awaited()
 
 

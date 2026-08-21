@@ -32,6 +32,25 @@ Serve the web API:
 uv run uvicorn server:app --app-dir src --port 8000
 ```
 
+## Docker
+
+```
+cp .env.example .env  # then set TG_ROUTER_TOKEN
+docker compose up -d --build
+```
+
+The API is served on `localhost:8000` (bind host/port in
+`docker-compose.yml` to expose it). Registrations are kept in the named
+volume `registrations` (`/data/registrations.xml` in the container).
+
+Register a chat from the container (prints a one-time deep link to open in
+Telegram):
+
+```
+docker compose run --rm tg-router \
+  uv run --no-sync python src/main.py --register alerts -r /data/registrations.xml
+```
+
 ## API
 
 ### Send a message
