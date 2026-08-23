@@ -3,7 +3,6 @@ import logging
 import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime
 from typing import Annotated
 
 from aiogram import Bot, Dispatcher
@@ -15,9 +14,9 @@ from aiogram.exceptions import (
 )
 from aiogram.types import User
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, status
-from pydantic import BaseModel, Field
 
 from config import Settings, load_settings
+from schemas import BotInfo, RegistrationLinks, SendMessageRequest, SendMessageResponse
 from storage import (
     StorageError,
     create_pending_registration,
@@ -34,33 +33,6 @@ async def run_storage[StorageResult](
     function: Callable[..., StorageResult], *args: object
 ) -> StorageResult:
     return await asyncio.to_thread(function, *args)
-
-
-class SendMessageRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=4096)
-    parse_mode: str | None = Field(default=None, pattern="^(HTML|MarkdownV2|Markdown)$")
-
-
-class SendMessageResponse(BaseModel):
-    ok: bool = True
-
-
-class RegistrationLinks(BaseModel):
-    name: str
-    expires_at: datetime
-    private_chat_url: str
-    group_chat_url: str
-
-
-class BotInfo(BaseModel):
-    name: str
-    chat_id: int
-    chat_type: str
-    title: str | None
-    username: str | None
-    first_name: str | None
-    last_name: str | None
-    language_code: str | None
 
 
 def get_settings(request: Request) -> Settings:
@@ -111,7 +83,7 @@ def create_app(settings: Settings | None = None, *, polling: bool = True) -> Fas
             yield
         except TelegramAPIError as error:
             raise RuntimeError(
-                f"Failed to validate TG_ROUTER_TOKEN: {error}"
+                f"Failed to validate TG_ROUTER_BOT_TOKEN: {error}"
             ) from error
         finally:
             try:
@@ -127,7 +99,7 @@ def create_app(settings: Settings | None = None, *, polling: bool = True) -> Fas
         app.state.settings = settings
 
     @app.post(
-        "/bots/{name}/registrations",
+        "/bots/{name}",
         response_model=RegistrationLinks,
         status_code=status.HTTP_201_CREATED,
     )

@@ -16,9 +16,9 @@ class Settings:
 
 
 def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
-    token = (env.get("TG_ROUTER_TOKEN") or "").strip()
+    token = (env.get("TG_ROUTER_BOT_TOKEN") or "").strip()
     if not token:
-        raise RuntimeError("TG_ROUTER_TOKEN environment variable must be set")
+        raise RuntimeError("TG_ROUTER_BOT_TOKEN environment variable must be set")
     api_key = (env.get("TG_ROUTER_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("TG_ROUTER_API_KEY environment variable must be set")

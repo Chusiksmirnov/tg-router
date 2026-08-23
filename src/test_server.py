@@ -108,7 +108,7 @@ def test_startup_fails_when_token_rejected(settings: Settings):
     app = create_app(settings, polling=False)
     app.state.bot = bot
     with (
-        pytest.raises(RuntimeError, match="Failed to validate TG_ROUTER_TOKEN"),
+        pytest.raises(RuntimeError, match="Failed to validate TG_ROUTER_BOT_TOKEN"),
         TestClient(app),
     ):
         pass
@@ -215,9 +215,7 @@ def test_health(client: TestClient):
 
 
 def test_create_registration_returns_expiring_deep_links(client: TestClient):
-    response = client.post(
-        "/bots/new-chat/registrations", headers={"X-API-Key": "test-api-key"}
-    )
+    response = client.post("/bots/new-chat", headers={"X-API-Key": "test-api-key"})
 
     assert response.status_code == 201
     body = response.json()
@@ -231,9 +229,7 @@ def test_create_registration_returns_expiring_deep_links(client: TestClient):
 
 
 def test_create_registration_rejects_invalid_name(client: TestClient):
-    response = client.post(
-        "/bots/bad%20name/registrations", headers={"X-API-Key": "test-api-key"}
-    )
+    response = client.post("/bots/bad%20name", headers={"X-API-Key": "test-api-key"})
 
     assert response.status_code == 422
 
@@ -250,15 +246,13 @@ def test_create_registration_fails_without_bot_username(
 
 
 def test_create_registration_requires_api_key(client: TestClient):
-    response = client.post("/bots/new-chat/registrations")
+    response = client.post("/bots/new-chat")
 
     assert response.status_code == 401
 
 
 def test_create_registration_rejects_wrong_api_key(client: TestClient):
-    response = client.post(
-        "/bots/new-chat/registrations", headers={"X-API-Key": "wrong"}
-    )
+    response = client.post("/bots/new-chat", headers={"X-API-Key": "wrong"})
 
     assert response.status_code == 403
 
@@ -332,3 +326,12 @@ def test_require_api_key_rejects_non_ascii_without_crashing(settings: Settings):
         require_api_key(settings, "é")
 
     assert error.value.status_code == 403
+
+
+def test_legacy_registration_route_is_not_available(client: TestClient):
+    response = client.post(
+        "/bots/new-chat/registrations",
+        headers={"X-API-Key": "test-api-key"},
+    )
+
+    assert response.status_code == 404

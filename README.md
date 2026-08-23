@@ -5,10 +5,10 @@ Registrations and short-lived registration links are stored in SQLite.
 
 ## Configuration
 
-Set the bot token from BotFather:
+Set the bot token from BotFather and a separate API key for registration requests:
 
 ```bash
-export TG_ROUTER_TOKEN=<TOKEN>
+export TG_ROUTER_BOT_TOKEN=<TOKEN>
 export TG_ROUTER_API_KEY=<RANDOM_SECRET>
 ```
 
@@ -28,13 +28,13 @@ Run the service:
 uv run uvicorn server:app --app-dir src --port 8000
 ```
 
-The service validates the token and starts Telegram polling at startup. Run only
-one polling instance for a bot token.
+The service validates the bot token and starts Telegram polling at startup. Run
+only one polling instance for a bot token.
 
 ## Docker
 
 ```bash
-cp .env.example .env  # then set TG_ROUTER_TOKEN and TG_ROUTER_API_KEY
+cp .env.example .env  # then set TG_ROUTER_BOT_TOKEN and TG_ROUTER_API_KEY
 docker compose up -d --build
 ```
 
@@ -45,12 +45,13 @@ The API is served on `localhost:8000`. The SQLite database is stored in the
 
 ### Register a chat
 
-Creating or replacing a registration requires the `X-API-Key` header. This prevents callers from taking over an existing routing name.
+Creating or replacing a registration requires the `X-API-Key` header. This
+prevents callers from taking over an existing routing name.
 
-Create a one-time registration link:
+A `POST` request to the bot name creates a one-time registration link:
 
 ```bash
-curl -X POST localhost:8000/bots/alerts/registrations \
+curl -X POST localhost:8000/bots/alerts \
   -H "X-API-Key: $TG_ROUTER_API_KEY"
 ```
 
@@ -74,7 +75,9 @@ only letters, digits, `_`, and `-`.
 ### Send a message
 
 ```bash
-curl -X POST localhost:8000/bots/alerts/messages   -H 'content-type: application/json' -d '{"text": "hello"}'
+curl -X POST localhost:8000/bots/alerts/messages \
+  -H 'content-type: application/json' \
+  -d '{"text": "hello"}'
 ```
 
 Example response:
@@ -86,7 +89,9 @@ Example response:
 Format with HTML or MarkdownV2 by setting `parse_mode`:
 
 ```bash
-curl -X POST localhost:8000/bots/alerts/messages   -H 'content-type: application/json'   -d '{"text": "<b>bold</b> code: <code>1+1=2</code> 🚀", "parse_mode": "HTML"}'
+curl -X POST localhost:8000/bots/alerts/messages \
+  -H 'content-type: application/json' \
+  -d '{"text": "<b>bold</b> code: <code>1+1=2</code> 🚀", "parse_mode": "HTML"}'
 ```
 
 ### List registered chats
@@ -95,13 +100,38 @@ curl -X POST localhost:8000/bots/alerts/messages   -H 'content-type: application
 curl localhost:8000/bots
 ```
 
+Example response:
+
+```json
+[
+  {
+    "name": "alerts",
+    "chat_id": -456,
+    "chat_type": "group",
+    "title": "Alerts",
+    "username": "alerts-ops",
+    "first_name": "Alert",
+    "last_name": "Ops",
+    "language_code": "en"
+  }
+]
+```
+
 ### Health check
 
 ```bash
 curl localhost:8000/health
 ```
 
+Example response:
+
+```json
+{"ok": true}
+```
+
 ## Running tests
+
+Run the pytest suite (in `src/test_*.py`):
 
 ```bash
 uv run pytest src/
