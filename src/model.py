@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass(frozen=True)
@@ -11,3 +12,10 @@ class Registration:
     first_name: str | None = None
     last_name: str | None = None
     language_code: str | None = None
+
+
+@dataclass(frozen=True)
+class PendingRegistration:
+    name: str
+    secret: str
+    expires_at: datetime

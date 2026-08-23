@@ -1,178 +1,195 @@
-import os
-import xml.etree.ElementTree as ET
+import secrets
+import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from aiogram.types import Chat, User
 
-from model import Registration
+from model import PendingRegistration, Registration
 
 
 class StorageError(Exception):
     pass
 
 
-OPTIONAL_FIELDS = (
-    ("username", "Username"),
-    ("first_name", "FirstName"),
-    ("last_name", "LastName"),
-    ("language_code", "LanguageCode"),
-)
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS registrations (
+    name TEXT PRIMARY KEY,
+    chat_id INTEGER NOT NULL,
+    chat_type TEXT NOT NULL,
+    title TEXT,
+    username TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    language_code TEXT
+);
+CREATE TABLE IF NOT EXISTS pending_registrations (
+    secret TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    expires_at REAL NOT NULL
+);
+"""
 
 
-def read_registrations(registrations_path: Path) -> list[Registration]:
-    if not registrations_path.exists():
-        return []
-
-    try:
-        root = ET.parse(registrations_path).getroot()
-    except ET.ParseError as error:
-        raise StorageError(
-            f"Cannot parse registrations file {registrations_path}: {error}"
-        ) from error
-    if root.tag != "Registrations":
-        raise StorageError(
-            f"Unexpected root element '{root.tag}' in {registrations_path}"
-        )
-    _ensure_unique_names(root, registrations_path)
-    registrations: list[Registration] = []
-    for element in root.findall("Registration"):
-        name = element.findtext("Name")
-        chat_id = element.findtext("ChatId")
-        if not name:
-            raise StorageError(
-                f"Registration entry without a Name in {registrations_path}"
-            )
-        if not chat_id:
-            raise StorageError(
-                f"Registration '{name}' without a ChatId in {registrations_path}"
-            )
-        try:
-            parsed_chat_id = int(chat_id)
-        except ValueError as error:
-            raise StorageError(
-                f"Invalid ChatId '{chat_id}' for registration '{name}' "
-                f"in {registrations_path}"
-            ) from error
-        registrations.append(
-            Registration(
-                name=name,
-                chat_id=parsed_chat_id,
-                chat_type=element.findtext("ChatType", ""),
-                title=element.findtext("Title"),
-                **{
-                    attr: element.findtext(tag)
-                    for attr, tag in OPTIONAL_FIELDS
-                },
-            )
-        )
-    return registrations
+def _connect(database_path: Path) -> sqlite3.Connection:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database_path, timeout=5)
+    connection.row_factory = sqlite3.Row
+    connection.executescript(_SCHEMA)
+    return connection
 
 
-def get_registration(
-    registrations_path: Path, name: str
-) -> Registration | None:
-    for registration in read_registrations(registrations_path):
-        if registration.name == name:
-            return registration
-    return None
+def _chat_type(chat: Chat) -> str:
+    return getattr(chat.type, "value", chat.type)
 
 
-def _ensure_unique_names(root: ET.Element, registrations_path: Path) -> None:
-    seen: set[str] = set()
-    for element in root.findall("Registration"):
-        name = element.findtext("Name")
-        if name is None:
-            continue
-        if name in seen:
-            raise StorageError(
-                f"Duplicate registration name '{name}' in {registrations_path}"
-            )
-        seen.add(name)
+def _registration_values(
+    name: str, chat: Chat, user: User | None
+) -> tuple[object, ...]:
+    return (
+        name,
+        chat.id,
+        _chat_type(chat),
+        chat.title,
+        getattr(user, "username", None),
+        getattr(user, "first_name", None),
+        getattr(user, "last_name", None),
+        getattr(user, "language_code", None),
+    )
 
 
-def _set_child(element: ET.Element, tag: str, text: str) -> None:
-    child = element.find(tag)
-    if child is None:
-        ET.SubElement(element, tag).text = text
-    else:
-        child.text = text
-
-
-def _remove_child(element: ET.Element, tag: str) -> None:
-    child = element.find(tag)
-    if child is not None:
-        element.remove(child)
-
-
-def _set_optional_child(element: ET.Element, tag: str, value: str | None) -> None:
-    child = element.find(tag)
-    if value:
-        if child is None:
-            ET.SubElement(element, tag).text = value
-        else:
-            child.text = value
-    else:
-        _remove_child(element, tag)
-
-
-def _apply_optional_metadata(
-    element: ET.Element, chat: Chat, user: User | None
+def _upsert_registration(
+    connection: sqlite3.Connection, name: str, chat: Chat, user: User | None
 ) -> None:
-    _set_optional_child(element, "Title", chat.title)
-    for attr, tag in OPTIONAL_FIELDS:
-        value = getattr(user, attr, None) if user is not None else None
-        _set_optional_child(element, tag, value)
+    connection.execute(
+        """
+        INSERT INTO registrations (
+            name, chat_id, chat_type, title, username,
+            first_name, last_name, language_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+            chat_id = excluded.chat_id,
+            chat_type = excluded.chat_type,
+            title = excluded.title,
+            username = excluded.username,
+            first_name = excluded.first_name,
+            last_name = excluded.last_name,
+            language_code = excluded.language_code
+        """,
+        _registration_values(name, chat, user),
+    )
+
+
+def _as_registration(row: sqlite3.Row) -> Registration:
+    return Registration(
+        name=row["name"],
+        chat_id=row["chat_id"],
+        chat_type=row["chat_type"],
+        title=row["title"],
+        username=row["username"],
+        first_name=row["first_name"],
+        last_name=row["last_name"],
+        language_code=row["language_code"],
+    )
+
+
+def read_registrations(database_path: Path) -> list[Registration]:
+    try:
+        with _connect(database_path) as connection:
+            rows = connection.execute(
+                "SELECT * FROM registrations ORDER BY name"
+            ).fetchall()
+    except (sqlite3.Error, OSError) as error:
+        raise StorageError(
+            f"Cannot read registrations database {database_path}: {error}"
+        ) from error
+    return [_as_registration(row) for row in rows]
+
+
+def get_registration(database_path: Path, name: str) -> Registration | None:
+    try:
+        with _connect(database_path) as connection:
+            row = connection.execute(
+                "SELECT * FROM registrations WHERE name = ?", (name,)
+            ).fetchone()
+    except (sqlite3.Error, OSError) as error:
+        raise StorageError(
+            f"Cannot read registrations database {database_path}: {error}"
+        ) from error
+    return _as_registration(row) if row is not None else None
 
 
 def store_registration(
-    registrations_path: Path,
+    database_path: Path,
     name: str,
     chat: Chat,
     user: User | None,
 ) -> Path:
-    if registrations_path.exists():
-        try:
-            tree = ET.parse(registrations_path)
-            root = tree.getroot()
-        except ET.ParseError as error:
-            raise StorageError(
-                f"Cannot parse registrations file {registrations_path}: {error}"
-            ) from error
-        if root.tag != "Registrations":
-            raise StorageError(
-                f"Unexpected root element '{root.tag}' in {registrations_path}"
-            )
-        _ensure_unique_names(root, registrations_path)
-    else:
-        root = ET.Element("Registrations")
-        tree = ET.ElementTree(root)
-
-    existing = next(
-        (
-            item
-            for item in root.findall("Registration")
-            if item.findtext("Name") == name
-        ),
-        None,
-    )
-    if existing is None:
-        registration = ET.SubElement(root, "Registration")
-        ET.SubElement(registration, "Name").text = name
-        ET.SubElement(registration, "ChatId").text = str(chat.id)
-        ET.SubElement(registration, "ChatType").text = chat.type
-        _apply_optional_metadata(registration, chat, user)
-    else:
-        _set_child(existing, "ChatId", str(chat.id))
-        _set_child(existing, "ChatType", chat.type)
-        _remove_child(existing, "Token")
-        _apply_optional_metadata(existing, chat, user)
-
-    registrations_path.parent.mkdir(parents=True, exist_ok=True)
-    ET.indent(tree, space="  ")
-    tmp_path = registrations_path.with_name(registrations_path.name + ".tmp")
     try:
-        tree.write(tmp_path, encoding="utf-8", xml_declaration=True)
-        os.replace(tmp_path, registrations_path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
-    return registrations_path
+        with _connect(database_path) as connection:
+            _upsert_registration(connection, name, chat, user)
+    except (sqlite3.Error, OSError) as error:
+        raise StorageError(
+            f"Cannot write registrations database {database_path}: {error}"
+        ) from error
+    return database_path
+
+
+def create_pending_registration(
+    database_path: Path,
+    name: str,
+    ttl_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> PendingRegistration:
+    current = now or datetime.now(UTC)
+    expires_at = current + timedelta(seconds=ttl_seconds)
+    secret = secrets.token_urlsafe(24)
+    try:
+        with _connect(database_path) as connection:
+            connection.execute(
+                "DELETE FROM pending_registrations WHERE expires_at <= ? OR name = ?",
+                (current.timestamp(), name),
+            )
+            connection.execute(
+                "INSERT INTO pending_registrations (secret, name, expires_at) VALUES (?, ?, ?)",
+                (secret, name, expires_at.timestamp()),
+            )
+    except (sqlite3.Error, OSError) as error:
+        raise StorageError(
+            f"Cannot write registrations database {database_path}: {error}"
+        ) from error
+    return PendingRegistration(name=name, secret=secret, expires_at=expires_at)
+
+
+def consume_pending_registration(
+    database_path: Path,
+    secret: str,
+    chat: Chat,
+    user: User | None,
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    current = now or datetime.now(UTC)
+    try:
+        with _connect(database_path) as connection:
+            connection.execute(
+                "DELETE FROM pending_registrations WHERE expires_at <= ?",
+                (current.timestamp(),),
+            )
+            row = connection.execute(
+                "SELECT name FROM pending_registrations WHERE secret = ?",
+                (secret,),
+            ).fetchone()
+            if row is None:
+                return None
+            name = row["name"]
+            _upsert_registration(connection, name, chat, user)
+            connection.execute(
+                "DELETE FROM pending_registrations WHERE secret = ?", (secret,)
+            )
+            return name
+    except (sqlite3.Error, OSError) as error:
+        raise StorageError(
+            f"Cannot write registrations database {database_path}: {error}"
+        ) from error

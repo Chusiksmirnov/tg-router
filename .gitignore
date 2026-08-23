@@ -12,6 +12,10 @@ wheels/
 # Secrets
 .env
 
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+
 # User-defined
-registrations.xml
 .DS_Store

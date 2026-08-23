@@ -1,4 +1,4 @@
-import xml.etree.ElementTree as ET
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -8,6 +8,8 @@ from aiogram.types import Chat, User
 from model import Registration
 from storage import (
     StorageError,
+    consume_pending_registration,
+    create_pending_registration,
     get_registration,
     read_registrations,
     store_registration,
@@ -15,12 +17,12 @@ from storage import (
 
 
 @pytest.fixture
-def registrations_path(tmp_path: Path) -> Path:
-    return tmp_path / "registrations.xml"
+def database_path(tmp_path: Path) -> Path:
+    return tmp_path / "registrations.db"
 
 
-def test_store_creates_file_and_read_round_trips_all_fields(
-    tmp_path: Path, registrations_path: Path
+def test_store_creates_sqlite_database_and_round_trips_all_fields(
+    database_path: Path,
 ):
     chat = Chat(id=-456, type=ChatType.GROUP, title="Parents")
     user = User(
@@ -32,12 +34,11 @@ def test_store_creates_file_and_read_round_trips_all_fields(
         language_code="en",
     )
 
-    stored = store_registration(registrations_path, "alerts", chat, user)
+    stored = store_registration(database_path, "alerts", chat, user)
 
-    assert stored == registrations_path
-    assert list(tmp_path.iterdir()) == [registrations_path]
-    registrations = read_registrations(registrations_path)
-    assert registrations == [
+    assert stored == database_path
+    assert database_path.read_bytes().startswith(b"SQLite format 3\x00")
+    assert read_registrations(database_path) == [
         Registration(
             name="alerts",
             chat_id=-456,
@@ -51,156 +52,104 @@ def test_store_creates_file_and_read_round_trips_all_fields(
     ]
 
 
-def test_upsert_updates_fields_and_preserves_legacy_metadata(
-    tmp_path: Path, registrations_path: Path
-):
-    registrations_path.write_text(
-        '<?xml version="1.0"?>\n'
-        "<Registrations><Registration><Name>alerts</Name>"
-        "<Token>old-token</Token>"
-        "<LegacyMetadata>keep-me</LegacyMetadata>"
-        "</Registration></Registrations>",
-        encoding="utf-8",
-    )
-    chat = Chat(id=-999, type=ChatType.GROUP, title="New Title")
-    user = User(id=42, is_bot=False, first_name="Example")
-
-    store_registration(registrations_path, "alerts", chat, user)
-
-    root = ET.parse(registrations_path).getroot()
-    assert len(root.findall("Registration")) == 1
-    assert (
-        root.findtext("./Registration[Name='alerts']/LegacyMetadata")
-        == "keep-me"
-    )
-    assert root.findtext("./Registration[Name='alerts']/Token") is None
-    assert root.findtext("./Registration[Name='alerts']/ChatId") == "-999"
-    assert root.findtext("./Registration[Name='alerts']/Title") == "New Title"
-
-
-def test_second_name_appends_and_get_registration_by_name(
-    tmp_path: Path, registrations_path: Path
-):
-    first = Chat(id=1, type=ChatType.PRIVATE)
-    second = Chat(id=2, type=ChatType.PRIVATE)
-
-    store_registration(registrations_path, "alerts", first, None)
-    store_registration(registrations_path, "other", second, None)
-
-    root = ET.parse(registrations_path).getroot()
-    assert len(root.findall("Registration")) == 2
-    assert get_registration(registrations_path, "alerts").chat_id == 1
-    assert get_registration(registrations_path, "other").chat_id == 2
-    assert get_registration(registrations_path, "unknown") is None
-
-
-def test_missing_file_reads_empty(tmp_path: Path, registrations_path: Path):
-    assert read_registrations(registrations_path) == []
-    assert get_registration(registrations_path, "alerts") is None
-
-
-def test_corrupt_file_raises_storage_error(
-    tmp_path: Path, registrations_path: Path
-):
-    registrations_path.write_text("not xml", encoding="utf-8")
-
-    with pytest.raises(StorageError, match="Cannot parse registrations file"):
-        read_registrations(registrations_path)
-    with pytest.raises(StorageError, match="Cannot parse registrations file"):
-        get_registration(registrations_path, "alerts")
-
-
-def test_non_integer_chat_id_raises_storage_error(
-    tmp_path: Path, registrations_path: Path
-):
-    registrations_path.write_text(
-        '<?xml version="1.0"?>\n'
-        "<Registrations><Registration>"
-        "<Name>alerts</Name><ChatId>abc</ChatId>"
-        "</Registration></Registrations>",
-        encoding="utf-8",
+def test_store_upserts_existing_name(database_path: Path):
+    store_registration(
+        database_path,
+        "alerts",
+        Chat(id=1, type=ChatType.PRIVATE),
+        None,
     )
 
-    with pytest.raises(StorageError, match="Invalid ChatId 'abc'"):
-        read_registrations(registrations_path)
-
-
-def test_wrong_root_tag_raises_storage_error(
-    tmp_path: Path, registrations_path: Path
-):
-    registrations_path.write_text(
-        '<?xml version="1.0"?>\n<Other></Other>', encoding="utf-8"
+    store_registration(
+        database_path,
+        "alerts",
+        Chat(id=-999, type=ChatType.GROUP, title="New Title"),
+        User(id=42, is_bot=False, first_name="Example"),
     )
 
-    with pytest.raises(StorageError, match="Unexpected root element 'Other'"):
-        read_registrations(registrations_path)
+    registrations = read_registrations(database_path)
+    assert len(registrations) == 1
+    assert registrations[0].chat_id == -999
+    assert registrations[0].title == "New Title"
+
+
+def test_missing_database_reads_empty(database_path: Path):
+    assert read_registrations(database_path) == []
+    assert get_registration(database_path, "alerts") is None
+
+
+def test_corrupt_database_raises_storage_error(database_path: Path):
+    database_path.write_text("not sqlite", encoding="utf-8")
+
+    with pytest.raises(StorageError, match="database"):
+        read_registrations(database_path)
+
+
+def test_pending_registration_has_ttl(database_path: Path):
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+
+    pending = create_pending_registration(
+        database_path, "alerts", ttl_seconds=60, now=now
+    )
+
+    assert pending.name == "alerts"
+    assert pending.secret
+    assert pending.expires_at == now + timedelta(seconds=60)
+
+
+def test_valid_pending_registration_is_consumed_once(database_path: Path):
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    pending = create_pending_registration(
+        database_path, "alerts", ttl_seconds=60, now=now
+    )
+    chat = Chat(id=-456, type=ChatType.GROUP, title="Alerts")
+
+    name = consume_pending_registration(
+        database_path, pending.secret, chat, None, now=now
+    )
+    second = consume_pending_registration(
+        database_path, pending.secret, chat, None, now=now
+    )
+
+    assert name == "alerts"
+    assert second is None
+    assert get_registration(database_path, "alerts").chat_id == -456
+
+
+def test_expired_pending_registration_cannot_be_consumed(database_path: Path):
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    pending = create_pending_registration(
+        database_path, "alerts", ttl_seconds=60, now=now
+    )
+
+    name = consume_pending_registration(
+        database_path,
+        pending.secret,
+        Chat(id=1, type=ChatType.PRIVATE),
+        None,
+        now=now + timedelta(seconds=61),
+    )
+
+    assert name is None
+    assert get_registration(database_path, "alerts") is None
+
+
+def test_new_pending_registration_replaces_previous_link(database_path: Path):
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    first = create_pending_registration(
+        database_path, "alerts", ttl_seconds=60, now=now
+    )
+    second = create_pending_registration(
+        database_path, "alerts", ttl_seconds=60, now=now
+    )
     chat = Chat(id=1, type=ChatType.PRIVATE)
-    with pytest.raises(StorageError, match="Unexpected root element 'Other'"):
-        store_registration(registrations_path, "alerts", chat, None)
 
-
-def test_entry_without_name_raises_storage_error(
-    tmp_path: Path, registrations_path: Path
-):
-    registrations_path.write_text(
-        '<?xml version="1.0"?>\n'
-        "<Registrations><Registration>"
-        "<ChatId>-456</ChatId></Registration></Registrations>",
-        encoding="utf-8",
+    assert first.secret != second.secret
+    assert (
+        consume_pending_registration(database_path, first.secret, chat, None, now=now)
+        is None
     )
-
-    with pytest.raises(StorageError, match="without a Name"):
-        read_registrations(registrations_path)
-
-
-def test_entry_without_chat_id_raises_storage_error(
-    tmp_path: Path, registrations_path: Path
-):
-    registrations_path.write_text(
-        '<?xml version="1.0"?>\n'
-        "<Registrations><Registration>"
-        "<Name>alerts</Name></Registration></Registrations>",
-        encoding="utf-8",
+    assert (
+        consume_pending_registration(database_path, second.secret, chat, None, now=now)
+        == "alerts"
     )
-
-    with pytest.raises(StorageError, match="without a ChatId"):
-        read_registrations(registrations_path)
-
-
-def test_duplicate_names_raise_storage_error(
-    tmp_path: Path, registrations_path: Path
-):
-    registrations_path.write_text(
-        '<?xml version="1.0"?>\n'
-        "<Registrations>"
-        "<Registration><Name>alerts</Name><ChatId>1</ChatId></Registration>"
-        "<Registration><Name>alerts</Name><ChatId>2</ChatId></Registration>"
-        "</Registrations>",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(
-        StorageError, match="Duplicate registration name 'alerts'"
-    ):
-        read_registrations(registrations_path)
-
-
-def test_store_into_duplicate_file_raises_storage_error(
-    tmp_path: Path, registrations_path: Path
-):
-    before = (
-        '<?xml version="1.0"?>\n'
-        "<Registrations>"
-        "<Registration><Name>alerts</Name><ChatId>1</ChatId></Registration>"
-        "<Registration><Name>alerts</Name><ChatId>2</ChatId></Registration>"
-        "</Registrations>"
-    )
-    registrations_path.write_text(before, encoding="utf-8")
-    chat = Chat(id=3, type=ChatType.PRIVATE)
-
-    with pytest.raises(
-        StorageError, match="Duplicate registration name 'alerts'"
-    ):
-        store_registration(registrations_path, "other", chat, None)
-
-    assert registrations_path.read_text(encoding="utf-8") == before

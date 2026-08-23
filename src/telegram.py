@@ -1,48 +1,52 @@
-import secrets
+import asyncio
+import logging
+from datetime import datetime
 from pathlib import Path
 
-from aiogram import Bot, Dispatcher
+from aiogram import Dispatcher, Router
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import Message
 
-from storage import store_registration
+from storage import StorageError, consume_pending_registration
+
+logger = logging.getLogger("tg-router")
 
 
-async def register_chat(name: str, token: str, registrations_path: Path) -> None:
-    secret = secrets.token_urlsafe(24)
+async def complete_registration(
+    database_path: Path,
+    secret: str,
+    message: Message,
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    name = await asyncio.to_thread(
+        consume_pending_registration,
+        database_path,
+        secret,
+        message.chat,
+        message.from_user,
+        now=now,
+    )
+    if name is None:
+        await message.answer("This registration link is invalid or has expired.")
+        return None
+    await message.answer(f"Messages can now be routed to this chat as '{name}'.")
+    return name
+
+
+def create_dispatcher(database_path: Path) -> Dispatcher:
     dispatcher = Dispatcher()
+    router = Router()
 
-    async with Bot(token=token) as bot:
-        bot_user = await bot.get_me()
-        if not bot_user.username:
-            raise RuntimeError("Telegram bot has no username")
+    @router.message(CommandStart(deep_link=True))
+    async def register(message: Message, command: CommandObject) -> None:
+        if not command.args:
+            return
+        try:
+            await complete_registration(database_path, command.args, message)
+        except StorageError as error:
+            logger.error("cannot complete chat registration: %s", error)
+            await message.answer("Registration failed due to a storage error.")
 
-        base = f"https://t.me/{bot_user.username}"
-        print(f"Private chat: {base}?start={secret}", flush=True)
-        print(f"Group chat:   {base}?startgroup={secret}", flush=True)
-        print(
-            "Waiting for the Telegram chat to open one of the links...",
-            flush=True,
-        )
-
-        @dispatcher.message(CommandStart(deep_link=True))
-        async def register(message: Message, command: CommandObject) -> None:
-            if command.args != secret:
-                return
-            path = store_registration(
-                registrations_path, name, message.chat, message.from_user
-            )
-            await message.answer(
-                f"Messages can now be routed to this chat as '{name}'."
-            )
-            print(
-                f"Registration '{name}' saved to {path} (chat {message.chat.id})",
-                flush=True,
-            )
-            await dispatcher.stop_polling()
-
-        await dispatcher.start_polling(
-            bot,
-            allowed_updates=dispatcher.resolve_used_update_types(),
-            close_bot_session=False,
-        )
+    dispatcher.include_router(router)
+    return dispatcher
