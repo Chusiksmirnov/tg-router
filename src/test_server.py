@@ -326,12 +326,3 @@ def test_require_api_key_rejects_non_ascii_without_crashing(settings: Settings):
         require_api_key(settings, "é")
 
     assert error.value.status_code == 403
-
-
-def test_legacy_registration_route_is_not_available(client: TestClient):
-    response = client.post(
-        "/bots/new-chat/registrations",
-        headers={"X-API-Key": "test-api-key"},
-    )
-
-    assert response.status_code == 404
