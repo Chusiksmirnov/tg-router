@@ -1,63 +1,80 @@
 # tg-router
 
-Store Telegram chats and route messages to them via a web API using a single bot
-token from the environment. Each registration binds one chat to a name in a flat
-XML file; a web request that names the chat resolves the `chat_id`, and messages
-are sent with the shared token.
+Route messages to named Telegram chats through one bot and a small web API.
+Registrations and short-lived registration links are stored in SQLite.
 
-Set the bot token from BotFather once:
+## Configuration
 
-```
+Set the bot token from BotFather:
+
+```bash
 export TG_ROUTER_TOKEN=<TOKEN>
+export TG_ROUTER_API_KEY=<RANDOM_SECRET>
 ```
 
-Optionally override where registrations are stored (default
-`./registrations.xml`):
+Optional settings:
 
-```
-export TG_ROUTER_REGISTRATIONS=/path/to/registrations.xml
-```
+```bash
+# Default: ./registrations.db
+export TG_ROUTER_DATABASE=/path/to/registrations.db
 
-Register a chat (prints a one-time deep link to open in Telegram). The name
-may only contain letters, digits, `_` and `-`; it is the key used in the API
-paths. Use `-r/--registrations` to store registrations in another file:
-
-```
-uv run ./src/main.py --register alerts
+# Registration-link lifetime in seconds; default: 600
+export TG_ROUTER_REGISTRATION_TTL_SECONDS=600
 ```
 
-Serve the web API:
+Run the service:
 
-```
+```bash
 uv run uvicorn server:app --app-dir src --port 8000
 ```
 
+The service validates the token and starts Telegram polling at startup. Run only
+one polling instance for a bot token.
+
 ## Docker
 
-```
-cp .env.example .env  # then set TG_ROUTER_TOKEN
+```bash
+cp .env.example .env  # then set TG_ROUTER_TOKEN and TG_ROUTER_API_KEY
 docker compose up -d --build
 ```
 
-The API is served on `localhost:8000` (bind host/port in
-`docker-compose.yml` to expose it). Registrations are kept in the named
-volume `registrations` (`/data/registrations.xml` in the container).
-
-Register a chat from the container (prints a one-time deep link to open in
-Telegram):
-
-```
-docker compose run --rm tg-router \
-  uv run --no-sync python src/main.py --register alerts -r /data/registrations.xml
-```
+The API is served on `localhost:8000`. The SQLite database is stored in the
+`registrations` volume at `/data/registrations.db`.
 
 ## API
 
+### Register a chat
+
+Creating or replacing a registration requires the `X-API-Key` header. This prevents callers from taking over an existing routing name.
+
+Create a one-time registration link:
+
+```bash
+curl -X POST localhost:8000/bots/alerts/registrations \
+  -H "X-API-Key: $TG_ROUTER_API_KEY"
+```
+
+Example response:
+
+```json
+{
+  "name": "alerts",
+  "expires_at": "2026-08-23T12:10:00Z",
+  "private_chat_url": "https://t.me/example_bot?start=...",
+  "group_chat_url": "https://t.me/example_bot?startgroup=..."
+}
+```
+
+Open the appropriate link in Telegram. Once the bot receives the `/start`
+command, the link is consumed and the chat is stored as `alerts`. Links expire
+after `TG_ROUTER_REGISTRATION_TTL_SECONDS`; creating another link for the same
+name immediately invalidates the previous one. Registration names may contain
+only letters, digits, `_`, and `-`.
+
 ### Send a message
 
-```
-curl -X POST localhost:8000/bots/alerts/messages \
-  -H 'content-type: application/json' -d '{"text": "hello"}'
+```bash
+curl -X POST localhost:8000/bots/alerts/messages   -H 'content-type: application/json' -d '{"text": "hello"}'
 ```
 
 Example response:
@@ -68,51 +85,24 @@ Example response:
 
 Format with HTML or MarkdownV2 by setting `parse_mode`:
 
-```
-curl -X POST localhost:8000/bots/alerts/messages \
-  -H 'content-type: application/json' \
-  -d '{"text": "<b>bold</b> code: <code>1+1=2</code> 🚀", "parse_mode": "HTML"}'
+```bash
+curl -X POST localhost:8000/bots/alerts/messages   -H 'content-type: application/json'   -d '{"text": "<b>bold</b> code: <code>1+1=2</code> 🚀", "parse_mode": "HTML"}'
 ```
 
 ### List registered chats
 
-```
+```bash
 curl localhost:8000/bots
-```
-
-Example response:
-
-```json
-[
-  {
-    "name": "alerts",
-    "chat_id": -456,
-    "chat_type": "group",
-    "title": "Alerts",
-    "username": "alerts-ops",
-    "first_name": "Alert",
-    "last_name": "Ops",
-    "language_code": "en"
-  }
-]
 ```
 
 ### Health check
 
-```
+```bash
 curl localhost:8000/health
-```
-
-Example response:
-
-```json
-{"ok": true}
 ```
 
 ## Running tests
 
-Run the pytest suite (in `src/test_*.py`):
-
-```
+```bash
 uv run pytest src/
 ```

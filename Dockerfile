@@ -16,7 +16,7 @@ RUN useradd --create-home appuser \
     && chown -R appuser:appuser /app /data
 USER appuser
 
-ENV TG_ROUTER_REGISTRATIONS=/data/registrations.xml
+ENV TG_ROUTER_DATABASE=/data/registrations.db
 
 EXPOSE 8000
 
