@@ -1,7 +1,6 @@
 services:
   tg-router:
-    build: .
-    image: tg-router
+    image: ghcr.io/chusiksmirnov/tg-router:latest
     env_file: .env
     volumes:
       - registrations:/data
