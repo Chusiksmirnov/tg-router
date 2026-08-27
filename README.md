@@ -33,13 +33,19 @@ only one polling instance for a bot token.
 
 ## Docker
 
+The Docker Compose configuration deploys the image published to GitHub
+Container Registry: `ghcr.io/chusiksmirnov/tg-router:latest`.
+
 ```bash
 cp .env.example .env  # then set TG_ROUTER_BOT_TOKEN and TG_ROUTER_API_KEY
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-The API is served on `localhost:8000`. The SQLite database is stored in the
-`registrations` volume at `/data/registrations.db`.
+Run `docker compose pull && docker compose up -d` to update an existing
+deployment to the latest published image. The API is served on `localhost:8000`.
+The SQLite database is stored in the `registrations` volume at
+`/data/registrations.db`.
 
 ## API
 
