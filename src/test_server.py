@@ -214,6 +214,17 @@ def test_health(client: TestClient):
     assert client.get("/health").json() == {"ok": True}
 
 
+def test_web_ui_is_served_at_root(client: TestClient):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "@picocss/pico" in response.text
+    assert "Create registration" in response.text
+    assert "Send message" in response.text
+    assert "Registered chats" in response.text
+
+
 def test_create_registration_returns_expiring_deep_links(client: TestClient):
     response = client.post("/bots/new-chat", headers={"X-API-Key": "test-api-key"})
 
