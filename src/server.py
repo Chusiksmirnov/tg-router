@@ -14,6 +14,7 @@ from aiogram.exceptions import (
 )
 from aiogram.types import User
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, status
+from fastapi.responses import HTMLResponse
 
 from config import Settings, load_settings
 from schemas import BotInfo, RegistrationLinks, SendMessageRequest, SendMessageResponse
@@ -24,6 +25,7 @@ from storage import (
     read_registrations,
 )
 from telegram import create_dispatcher
+from web import web_ui
 
 logger = logging.getLogger("tg-router")
 NAME_PATTERN = r"^[A-Za-z0-9_-]+$"
@@ -97,6 +99,10 @@ def create_app(settings: Settings | None = None, *, polling: bool = True) -> Fas
     app = FastAPI(title="tg-router", lifespan=lifespan)
     if settings is not None:
         app.state.settings = settings
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> HTMLResponse:
+        return web_ui()
 
     @app.post(
         "/bots/{name}",

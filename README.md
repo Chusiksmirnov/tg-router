@@ -47,6 +47,13 @@ deployment to the latest published image. The API is served on `localhost:8000`.
 The SQLite database is stored in the `registrations` volume at
 `/data/registrations.db`.
 
+## Web UI
+
+Open `http://localhost:8000/` to manage routes in the browser. The Pico.css UI
+lists registered chats, creates the time-limited Telegram links, and sends messages.
+The registration API key is submitted only to create a registration link and is not
+stored by the UI.
+
 ## API
 
 ### Register a chat
